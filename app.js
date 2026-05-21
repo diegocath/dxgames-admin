@@ -14,6 +14,8 @@ const state = {
   scheduled: null,
   analytics: null,
   analyticsVersion: "",
+  analyticsOutcome: "",
+  analyticsOutcomeOptions: [],
   analyticsLoading: false,
   analyticsError: "",
   versionsLoading: false,
@@ -50,6 +52,12 @@ function formatDate(iso) {
 function formatDuration(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return `${Number(value).toFixed(2)} s`;
+}
+
+function outcomeKeyToDeathAct(key) {
+  if (key === "survived") return "-1";
+  if (key?.startsWith("death_act_")) return key.slice("death_act_".length);
+  return "";
 }
 
 async function apiFetch(path, init = {}) {
@@ -141,15 +149,22 @@ async function mockApiFetch(path, init = {}) {
     };
   }
   if (path.startsWith("/stx/admin/analytics/summary")) {
+    const url = new URL(path, "https://mock.local");
+    const deathAct = url.searchParams.get("death_act");
+    const allOutcomes = [
+      { key: "survived", label: "Survived", count: 14 },
+      { key: "death_act_1", label: "Died · Deadlands", count: 9 },
+      { key: "death_act_2", label: "Died · The Edge", count: 11 },
+      { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
+    ];
+    const outcomes = deathAct === null
+      ? allOutcomes
+      : allOutcomes.filter((row) => outcomeKeyToDeathAct(row.key) === deathAct);
+    const count = outcomes.reduce((sum, row) => sum + row.count, 0);
     return {
-      count: 42,
-      average_time: 118.42,
-      outcomes: [
-        { key: "survived", label: "Survived", count: 14 },
-        { key: "death_act_1", label: "Died · Deadlands", count: 9 },
-        { key: "death_act_2", label: "Died · The Edge", count: 11 },
-        { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
-      ],
+      count,
+      average_time: deathAct === null ? 118.42 : 104.6,
+      outcomes,
       popular_weapons: [
         { id: 20, label: "Sparkling Spell", count: 18 },
         { id: 4, label: "Fire Censer", count: 12 },
@@ -303,6 +318,7 @@ function renderAnalyticsPanel() {
 
   const summary = state.analytics;
   const appVersions = Array.isArray(summary.app_versions) ? summary.app_versions : [];
+  const outcomeOptions = Array.isArray(state.analyticsOutcomeOptions) ? state.analyticsOutcomeOptions : [];
   const knownKeys = new Set(["count", "average_time", "outcomes", "popular_weapons", "popular_info_items", "app_versions"]);
   const extraEntries = Object.entries(summary).filter(([key]) => !knownKeys.has(key));
 
@@ -313,15 +329,31 @@ function renderAnalyticsPanel() {
         <h2 class="panel-title">Run analytics</h2>
         <p class="muted">Summary from <code>/stx/admin/analytics/summary</code>.</p>
       </div>
-      <label class="field">
-        <span>App version</span>
-        <select class="select" data-field="analytics-version">
-          <option value="">All versions</option>
-          ${appVersions.map((version) => `
-            <option value="${escapeHtml(version)}" ${version === state.analyticsVersion ? "selected" : ""}>${escapeHtml(version)}</option>
-          `).join("")}
-        </select>
-      </label>
+      <div class="analytics-filters">
+        <label class="field">
+          <span>App version</span>
+          <select class="select" data-field="analytics-version">
+            <option value="">All versions</option>
+            ${appVersions.map((version) => `
+              <option value="${escapeHtml(version)}" ${version === state.analyticsVersion ? "selected" : ""}>${escapeHtml(version)}</option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span>Outcome</span>
+          <select class="select" data-field="analytics-outcome">
+            <option value="">All outcomes</option>
+            ${outcomeOptions.map((outcome) => {
+              const value = outcomeKeyToDeathAct(outcome.key);
+              return `
+                <option value="${escapeHtml(value)}" ${value === state.analyticsOutcome ? "selected" : ""}>
+                  ${escapeHtml(outcome.label ?? outcome.key)} (${escapeHtml(outcome.count ?? 0)})
+                </option>
+              `;
+            }).join("")}
+          </select>
+        </label>
+      </div>
     </div>
     <div class="stat-grid">
       <div class="stat"><span>Runs</span><strong>${escapeHtml(summary.count ?? 0)}</strong></div>
@@ -427,12 +459,29 @@ async function loadAnalytics() {
   state.analyticsError = "";
   renderShell();
   try {
-    const params = new URLSearchParams();
+    const baseParams = new URLSearchParams();
     if (state.analyticsVersion) {
-      params.set("app_version", state.analyticsVersion);
+      baseParams.set("app_version", state.analyticsVersion);
     }
-    const query = params.toString();
-    state.analytics = await apiFetch(`/stx/admin/analytics/summary${query ? `?${query}` : ""}`);
+    const baseQuery = baseParams.toString();
+    const optionsPath = `/stx/admin/analytics/summary${baseQuery ? `?${baseQuery}` : ""}`;
+
+    if (state.analyticsOutcome) {
+      const filteredParams = new URLSearchParams(baseParams);
+      filteredParams.set("death_act", state.analyticsOutcome);
+      const [optionsSummary, filteredSummary] = await Promise.all([
+        apiFetch(optionsPath),
+        apiFetch(`/stx/admin/analytics/summary?${filteredParams.toString()}`)
+      ]);
+      state.analyticsOutcomeOptions = Array.isArray(optionsSummary.outcomes) ? optionsSummary.outcomes : [];
+      state.analytics = {
+        ...filteredSummary,
+        app_versions: Array.isArray(optionsSummary.app_versions) ? optionsSummary.app_versions : filteredSummary.app_versions
+      };
+    } else {
+      state.analytics = await apiFetch(optionsPath);
+      state.analyticsOutcomeOptions = Array.isArray(state.analytics.outcomes) ? state.analytics.outcomes : [];
+    }
     state.analyticsLoading = false;
   } catch (error) {
     state.analyticsLoading = false;
@@ -514,6 +563,11 @@ app.addEventListener("change", (event) => {
   const target = event.target;
   if (target?.dataset?.field === "analytics-version") {
     state.analyticsVersion = target.value;
+    state.analyticsOutcome = "";
+    void loadAnalytics();
+  }
+  if (target?.dataset?.field === "analytics-outcome") {
+    state.analyticsOutcome = target.value;
     void loadAnalytics();
   }
 });
