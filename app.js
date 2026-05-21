@@ -60,6 +60,33 @@ function outcomeKeyToDeathAct(key) {
   return "";
 }
 
+function buildOutcomeFilterOptions(outcomes) {
+  if (!Array.isArray(outcomes)) return [];
+
+  let deadCount = 0;
+  const options = [];
+  for (const outcome of outcomes) {
+    const value = outcomeKeyToDeathAct(outcome.key);
+    if (!value) continue;
+    if (value !== "-1") {
+      deadCount += Number(outcome.count) || 0;
+    }
+    options.push({
+      value,
+      label: outcome.label ?? outcome.key,
+      count: Number(outcome.count) || 0
+    });
+  }
+
+  if (deadCount > 0) {
+    const survivedIndex = options.findIndex((option) => option.value === "-1");
+    const deadOption = { value: "dead", label: "Died", count: deadCount };
+    options.splice(survivedIndex === -1 ? 0 : survivedIndex + 1, 0, deadOption);
+  }
+
+  return options;
+}
+
 async function apiFetch(path, init = {}) {
   if (LOCAL_MOCK) {
     return mockApiFetch(path, init);
@@ -159,7 +186,10 @@ async function mockApiFetch(path, init = {}) {
     ];
     const outcomes = deathAct === null
       ? allOutcomes
-      : allOutcomes.filter((row) => outcomeKeyToDeathAct(row.key) === deathAct);
+      : allOutcomes.filter((row) => {
+        const value = outcomeKeyToDeathAct(row.key);
+        return deathAct === "dead" ? value !== "-1" : value === deathAct;
+      });
     const count = outcomes.reduce((sum, row) => sum + row.count, 0);
     return {
       count,
@@ -343,10 +373,9 @@ function renderAnalyticsPanel() {
           <span>Outcome</span>
           <select class="select" data-field="analytics-outcome">
             <option value="">All outcomes</option>
-            ${outcomeOptions.map((outcome) => {
-              const value = outcomeKeyToDeathAct(outcome.key);
+            ${buildOutcomeFilterOptions(outcomeOptions).map((outcome) => {
               return `
-                <option value="${escapeHtml(value)}" ${value === state.analyticsOutcome ? "selected" : ""}>
+                <option value="${escapeHtml(outcome.value)}" ${outcome.value === state.analyticsOutcome ? "selected" : ""}>
                   ${escapeHtml(outcome.label ?? outcome.key)} (${escapeHtml(outcome.count ?? 0)})
                 </option>
               `;
