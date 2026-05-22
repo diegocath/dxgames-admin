@@ -401,10 +401,10 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, value));
 }
 
-function formatPercent(value) {
-  if (!Number.isFinite(value)) return "0%";
-  if (value === 0 || value === 100) return `${Math.round(value)}%`;
-  return `${value.toFixed(1)}%`;
+function barColorForPercent(value) {
+  const percent = clampPercent(value);
+  const hue = Math.round(210 - percent * 1.35);
+  return `hsl(${hue} 72% 48%)`;
 }
 
 function renderBarSection(title, rows, totalRuns) {
@@ -428,8 +428,8 @@ function renderBarSection(title, rows, totalRuns) {
         return `
           <div class="bar-row">
             <span class="bar-label">${escapeHtml(label)}</span>
-            <span class="bar-count">${count} · ${formatPercent(percent)}</span>
-            <span class="bar-track"><span class="bar-fill" style="width: ${percent}%"></span></span>
+            <span class="bar-count">${count}</span>
+            <span class="bar-track"><span class="bar-fill" style="width: ${percent}%; --bar-color: ${barColorForPercent(percent)}"></span></span>
           </div>
         `;
       }).join("")}
