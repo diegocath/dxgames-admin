@@ -389,14 +389,25 @@ function renderAnalyticsPanel() {
       <div class="stat"><span>Average run time</span><strong>${escapeHtml(formatDuration(summary.average_time))}</strong></div>
       <div class="stat"><span>Versions</span><strong>${appVersions.length}</strong></div>
     </div>
-    ${renderBarSection("Outcome breakdown", summary.outcomes)}
-    ${renderBarSection("Popular weapons", summary.popular_weapons)}
-    ${renderBarSection("Popular info items", summary.popular_info_items)}
+    ${renderBarSection("Outcome breakdown", summary.outcomes, summary.count)}
+    ${renderBarSection("Popular weapons", summary.popular_weapons, summary.count)}
+    ${renderBarSection("Popular info items", summary.popular_info_items, summary.count)}
     ${extraEntries.length ? renderJsonSection("Additional summary fields", extraEntries) : ""}
   `;
 }
 
-function renderBarSection(title, rows) {
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatPercent(value) {
+  if (!Number.isFinite(value)) return "0%";
+  if (value === 0 || value === 100) return `${Math.round(value)}%`;
+  return `${value.toFixed(1)}%`;
+}
+
+function renderBarSection(title, rows, totalRuns) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return `
       <section class="analytics-section">
@@ -406,18 +417,19 @@ function renderBarSection(title, rows) {
     `;
   }
 
-  const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
+  const denominator = Math.max(Number(totalRuns) || 0, 0);
   return `
     <section class="analytics-section">
       <h3>${escapeHtml(title)}</h3>
       ${rows.map((row) => {
         const label = row.label ?? row.key ?? row.id ?? "Unknown";
         const count = Number(row.count) || 0;
+        const percent = denominator > 0 ? clampPercent((count / denominator) * 100) : 0;
         return `
           <div class="bar-row">
             <span class="bar-label">${escapeHtml(label)}</span>
-            <span class="bar-count">${count}</span>
-            <span class="bar-track"><span class="bar-fill" style="width: ${(count / max) * 100}%"></span></span>
+            <span class="bar-count">${count} · ${formatPercent(percent)}</span>
+            <span class="bar-track"><span class="bar-fill" style="width: ${percent}%"></span></span>
           </div>
         `;
       }).join("")}
