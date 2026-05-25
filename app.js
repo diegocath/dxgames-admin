@@ -15,6 +15,7 @@ const state = {
   analytics: null,
   analyticsVersion: "",
   analyticsOutcome: "",
+  analyticsWonGame: false,
   analyticsOutcomeOptions: [],
   analyticsLoading: false,
   analyticsError: "",
@@ -178,12 +179,18 @@ async function mockApiFetch(path, init = {}) {
   if (path.startsWith("/stx/admin/analytics/summary")) {
     const url = new URL(path, "https://mock.local");
     const deathAct = url.searchParams.get("death_act");
-    const allOutcomes = [
-      { key: "survived", label: "Survived", count: 14 },
-      { key: "death_act_1", label: "Died · Deadlands", count: 9 },
-      { key: "death_act_2", label: "Died · The Edge", count: 11 },
-      { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
-    ];
+    const wonGame = url.searchParams.get("won_game") === "true";
+    const allOutcomes = wonGame
+      ? [
+        { key: "survived", label: "Survived", count: 5 },
+        { key: "death_act_2", label: "Died · The Edge", count: 3 }
+      ]
+      : [
+        { key: "survived", label: "Survived", count: 14 },
+        { key: "death_act_1", label: "Died · Deadlands", count: 9 },
+        { key: "death_act_2", label: "Died · The Edge", count: 11 },
+        { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
+      ];
     const outcomes = deathAct === null
       ? allOutcomes
       : allOutcomes.filter((row) => {
@@ -193,18 +200,28 @@ async function mockApiFetch(path, init = {}) {
     const count = outcomes.reduce((sum, row) => sum + row.count, 0);
     return {
       count,
-      average_time: deathAct === null ? 118.42 : 104.6,
+      average_time: wonGame ? 96.75 : deathAct === null ? 118.42 : 104.6,
       outcomes,
-      popular_weapons: [
-        { id: 20, label: "Sparkling Spell", count: 18 },
-        { id: 4, label: "Fire Censer", count: 12 },
-        { id: 10, label: "Lightning Rod", count: 8 }
-      ],
-      popular_info_items: [
-        { id: 37, label: "Necronomicon", count: 20 },
-        { id: 38, label: "Pendulum", count: 13 },
-        { id: 39, label: "Compass", count: 7 }
-      ],
+      popular_weapons: wonGame
+        ? [
+          { id: 20, label: "Sparkling Spell", count: 6 },
+          { id: 10, label: "Lightning Rod", count: 4 }
+        ]
+        : [
+          { id: 20, label: "Sparkling Spell", count: 18 },
+          { id: 4, label: "Fire Censer", count: 12 },
+          { id: 10, label: "Lightning Rod", count: 8 }
+        ],
+      popular_info_items: wonGame
+        ? [
+          { id: 37, label: "Necronomicon", count: 7 },
+          { id: 39, label: "Compass", count: 4 }
+        ]
+        : [
+          { id: 37, label: "Necronomicon", count: 20 },
+          { id: 38, label: "Pendulum", count: 13 },
+          { id: 39, label: "Compass", count: 7 }
+        ],
       app_versions: ["1.3.0", "1.2.4", "1.2.3"]
     };
   }
@@ -382,6 +399,13 @@ function renderAnalyticsPanel() {
             }).join("")}
           </select>
         </label>
+        <label class="field">
+          <span>Player wins</span>
+          <select class="select" data-field="analytics-won-game">
+            <option value="" ${state.analyticsWonGame ? "" : "selected"}>All players</option>
+            <option value="true" ${state.analyticsWonGame ? "selected" : ""}>Won game</option>
+          </select>
+        </label>
       </div>
     </div>
     <div class="stat-grid">
@@ -405,6 +429,11 @@ function barColorForPercent(value) {
   const percent = clampPercent(value);
   const hue = Math.round(210 - percent * 1.35);
   return `hsl(${hue} 72% 48%)`;
+}
+
+function analyticsSummaryPath(params) {
+  const query = params.toString();
+  return `/stx/admin/analytics/summary${query ? `?${query}` : ""}`;
 }
 
 function renderBarSection(title, rows, totalRuns) {
@@ -504,24 +533,28 @@ async function loadAnalytics() {
     if (state.analyticsVersion) {
       baseParams.set("app_version", state.analyticsVersion);
     }
-    const baseQuery = baseParams.toString();
-    const optionsPath = `/stx/admin/analytics/summary${baseQuery ? `?${baseQuery}` : ""}`;
+    if (state.analyticsWonGame) {
+      baseParams.set("won_game", "true");
+    }
 
-    if (state.analyticsOutcome) {
+    const optionsSummary = await apiFetch(analyticsSummaryPath(baseParams));
+    state.analyticsOutcomeOptions = Array.isArray(optionsSummary.outcomes) ? optionsSummary.outcomes : [];
+    const outcomeOptions = buildOutcomeFilterOptions(state.analyticsOutcomeOptions);
+    const outcomeIsAvailable = outcomeOptions.some((option) => option.value === state.analyticsOutcome);
+
+    if (state.analyticsOutcome && outcomeIsAvailable) {
       const filteredParams = new URLSearchParams(baseParams);
       filteredParams.set("death_act", state.analyticsOutcome);
-      const [optionsSummary, filteredSummary] = await Promise.all([
-        apiFetch(optionsPath),
-        apiFetch(`/stx/admin/analytics/summary?${filteredParams.toString()}`)
-      ]);
-      state.analyticsOutcomeOptions = Array.isArray(optionsSummary.outcomes) ? optionsSummary.outcomes : [];
+      const filteredSummary = await apiFetch(analyticsSummaryPath(filteredParams));
       state.analytics = {
         ...filteredSummary,
         app_versions: Array.isArray(optionsSummary.app_versions) ? optionsSummary.app_versions : filteredSummary.app_versions
       };
     } else {
-      state.analytics = await apiFetch(optionsPath);
-      state.analyticsOutcomeOptions = Array.isArray(state.analytics.outcomes) ? state.analytics.outcomes : [];
+      if (state.analyticsOutcome && !outcomeIsAvailable) {
+        state.analyticsOutcome = "";
+      }
+      state.analytics = optionsSummary;
     }
     state.analyticsLoading = false;
   } catch (error) {
@@ -609,6 +642,10 @@ app.addEventListener("change", (event) => {
   }
   if (target?.dataset?.field === "analytics-outcome") {
     state.analyticsOutcome = target.value;
+    void loadAnalytics();
+  }
+  if (target?.dataset?.field === "analytics-won-game") {
+    state.analyticsWonGame = target.value === "true";
     void loadAnalytics();
   }
 });
