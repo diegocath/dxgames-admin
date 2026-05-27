@@ -1,6 +1,27 @@
 const API_BASE = "https://api.dxgames.eu";
 const RETURN_TO = "https://admin.dxgames.eu/";
 const PLATFORMS = ["iOS", "Android", "Steam"];
+const ANALYTICS_PLAYER_XP_OPTIONS = [
+  { value: "", label: "All players" },
+  { value: "new", label: "New players" },
+  { value: "beginner", label: "Beginners" },
+  { value: "intermediate", label: "Intermediate" },
+  { value: "expert", label: "Expert" }
+];
+const ANALYTICS_MAIN_EDGE_OPTIONS = [
+  { value: "", label: "All Edge mains" },
+  { value: "rats", label: "Rats" },
+  { value: "spiders", label: "Spiders" },
+  { value: "necros", label: "Necros" },
+  { value: "armored", label: "Armored" }
+];
+const ANALYTICS_BOSS_OPTIONS = [
+  { value: "", label: "All bosses" },
+  { value: "vampire", label: "Vampire" },
+  { value: "lich", label: "Lich" },
+  { value: "gargoyle", label: "Gargoyle" },
+  { value: "shadow", label: "Shadow" }
+];
 const LOCAL_MOCK = ["localhost", "127.0.0.1"].includes(window.location.hostname)
   ? new URLSearchParams(window.location.search).get("mock")
   : null;
@@ -15,7 +36,9 @@ const state = {
   analytics: null,
   analyticsVersion: "",
   analyticsOutcome: "",
-  analyticsWonGame: false,
+  analyticsPlayerXp: "",
+  analyticsMainEdge: "",
+  analyticsBoss: "",
   analyticsOutcomeOptions: [],
   analyticsLoading: false,
   analyticsError: "",
@@ -179,18 +202,27 @@ async function mockApiFetch(path, init = {}) {
   if (path.startsWith("/stx/admin/analytics/summary")) {
     const url = new URL(path, "https://mock.local");
     const deathAct = url.searchParams.get("death_act");
-    const wonGame = url.searchParams.get("won_game") === "true";
-    const allOutcomes = wonGame
-      ? [
-        { key: "survived", label: "Survived", count: 5 },
-        { key: "death_act_2", label: "Died · The Edge", count: 3 }
-      ]
-      : [
-        { key: "survived", label: "Survived", count: 14 },
-        { key: "death_act_1", label: "Died · Deadlands", count: 9 },
-        { key: "death_act_2", label: "Died · The Edge", count: 11 },
-        { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
-      ];
+    const playerXp = url.searchParams.get("player_xp") || "";
+    const mainEdge = url.searchParams.get("main_edge") || "";
+    const boss = url.searchParams.get("boss") || "";
+    const selectedFilters = [playerXp, mainEdge, boss].filter(Boolean).length;
+    const xpFactors = { new: 0.42, beginner: 0.56, intermediate: 0.72, expert: 0.88 };
+    const edgeFactors = { rats: 0.74, spiders: 0.62, necros: 0.5, armored: 0.44 };
+    const bossFactors = { vampire: 0.78, lich: 0.64, gargoyle: 0.52, shadow: 0.4 };
+    const baseOutcomes = [
+      { key: "survived", label: "Survived", count: 14 },
+      { key: "death_act_1", label: "Died · Deadlands", count: 9 },
+      { key: "death_act_2", label: "Died · The Edge", count: 11 },
+      { key: "death_act_3", label: "Died · Mausoleum", count: 8 }
+    ];
+    const allOutcomes = baseOutcomes.map((row, index) => {
+      const xpFactor = xpFactors[playerXp] ?? 1;
+      const edgeFactor = edgeFactors[mainEdge] ?? 1;
+      const bossFactor = bossFactors[boss] ?? 1;
+      const rowVariance = selectedFilters ? 1 + index * 0.08 : 1;
+      const count = Math.max(selectedFilters ? 1 : 0, Math.round(row.count * xpFactor * edgeFactor * bossFactor * rowVariance));
+      return { ...row, count };
+    });
     const outcomes = deathAct === null
       ? allOutcomes
       : allOutcomes.filter((row) => {
@@ -198,30 +230,22 @@ async function mockApiFetch(path, init = {}) {
         return deathAct === "dead" ? value !== "-1" : value === deathAct;
       });
     const count = outcomes.reduce((sum, row) => sum + row.count, 0);
+    const popularScale = count > 0 ? Math.max(0.18, count / 42) : 0;
+    const scaleCount = (value) => Math.max(count > 0 ? 1 : 0, Math.round(value * popularScale));
     return {
       count,
-      average_time: wonGame ? 96.75 : deathAct === null ? 118.42 : 104.6,
+      average_time: Math.max(42, (deathAct === null ? 118.42 : 104.6) - selectedFilters * 9.5),
       outcomes,
-      popular_weapons: wonGame
-        ? [
-          { id: 20, label: "Sparkling Spell", count: 6 },
-          { id: 10, label: "Lightning Rod", count: 4 }
-        ]
-        : [
-          { id: 20, label: "Sparkling Spell", count: 18 },
-          { id: 4, label: "Fire Censer", count: 12 },
-          { id: 10, label: "Lightning Rod", count: 8 }
-        ],
-      popular_info_items: wonGame
-        ? [
-          { id: 37, label: "Necronomicon", count: 7 },
-          { id: 39, label: "Compass", count: 4 }
-        ]
-        : [
-          { id: 37, label: "Necronomicon", count: 20 },
-          { id: 38, label: "Pendulum", count: 13 },
-          { id: 39, label: "Compass", count: 7 }
-        ],
+      popular_weapons: [
+        { id: 20, label: "Sparkling Spell", count: scaleCount(18) },
+        { id: 4, label: "Fire Censer", count: scaleCount(12) },
+        { id: 10, label: "Lightning Rod", count: scaleCount(8) }
+      ],
+      popular_info_items: [
+        { id: 37, label: "Necronomicon", count: scaleCount(20) },
+        { id: 38, label: "Pendulum", count: scaleCount(13) },
+        { id: 39, label: "Compass", count: scaleCount(7) }
+      ],
       app_versions: ["1.3.0", "1.2.4", "1.2.3"]
     };
   }
@@ -400,10 +424,33 @@ function renderAnalyticsPanel() {
           </select>
         </label>
         <label class="field">
-          <span>Player wins</span>
-          <select class="select" data-field="analytics-won-game">
-            <option value="" ${state.analyticsWonGame ? "" : "selected"}>All players</option>
-            <option value="true" ${state.analyticsWonGame ? "selected" : ""}>Won game</option>
+          <span>Player XP</span>
+          <select class="select" data-field="analytics-player-xp">
+            ${ANALYTICS_PLAYER_XP_OPTIONS.map((option) => `
+              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsPlayerXp ? "selected" : ""}>
+                ${escapeHtml(option.label)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span>Main Edge</span>
+          <select class="select" data-field="analytics-main-edge">
+            ${ANALYTICS_MAIN_EDGE_OPTIONS.map((option) => `
+              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsMainEdge ? "selected" : ""}>
+                ${escapeHtml(option.label)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span>Boss</span>
+          <select class="select" data-field="analytics-boss">
+            ${ANALYTICS_BOSS_OPTIONS.map((option) => `
+              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsBoss ? "selected" : ""}>
+                ${escapeHtml(option.label)}
+              </option>
+            `).join("")}
           </select>
         </label>
       </div>
@@ -533,8 +580,14 @@ async function loadAnalytics() {
     if (state.analyticsVersion) {
       baseParams.set("app_version", state.analyticsVersion);
     }
-    if (state.analyticsWonGame) {
-      baseParams.set("won_game", "true");
+    if (state.analyticsPlayerXp) {
+      baseParams.set("player_xp", state.analyticsPlayerXp);
+    }
+    if (state.analyticsMainEdge) {
+      baseParams.set("main_edge", state.analyticsMainEdge);
+    }
+    if (state.analyticsBoss) {
+      baseParams.set("boss", state.analyticsBoss);
     }
 
     const optionsSummary = await apiFetch(analyticsSummaryPath(baseParams));
@@ -644,8 +697,16 @@ app.addEventListener("change", (event) => {
     state.analyticsOutcome = target.value;
     void loadAnalytics();
   }
-  if (target?.dataset?.field === "analytics-won-game") {
-    state.analyticsWonGame = target.value === "true";
+  if (target?.dataset?.field === "analytics-player-xp") {
+    state.analyticsPlayerXp = target.value;
+    void loadAnalytics();
+  }
+  if (target?.dataset?.field === "analytics-main-edge") {
+    state.analyticsMainEdge = target.value;
+    void loadAnalytics();
+  }
+  if (target?.dataset?.field === "analytics-boss") {
+    state.analyticsBoss = target.value;
     void loadAnalytics();
   }
 });
