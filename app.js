@@ -8,6 +8,13 @@ const ANALYTICS_PLAYER_XP_OPTIONS = [
   { value: "intermediate", label: "Intermediate" },
   { value: "expert", label: "Expert" }
 ];
+const ANALYTICS_MAIN_DEADLANDS_OPTIONS = [
+  { value: "", label: "All Deadlands mains" },
+  { value: "ooze", label: "Ooze" },
+  { value: "skelechonk", label: "Skelechonk" },
+  { value: "banshee", label: "Banshee" },
+  { value: "ghost", label: "Ghost" }
+];
 const ANALYTICS_MAIN_EDGE_OPTIONS = [
   { value: "", label: "All Edge mains" },
   { value: "rats", label: "Rats" },
@@ -37,6 +44,7 @@ const state = {
   analyticsVersion: "",
   analyticsOutcome: "",
   analyticsPlayerXp: "",
+  analyticsMainDeadlands: "",
   analyticsMainEdge: "",
   analyticsBoss: "",
   analyticsOutcomeOptions: [],
@@ -203,10 +211,12 @@ async function mockApiFetch(path, init = {}) {
     const url = new URL(path, "https://mock.local");
     const deathAct = url.searchParams.get("death_act");
     const playerXp = url.searchParams.get("player_xp") || "";
+    const mainDeadlands = url.searchParams.get("main_deadlands") || "";
     const mainEdge = url.searchParams.get("main_edge") || "";
     const boss = url.searchParams.get("boss") || "";
-    const selectedFilters = [playerXp, mainEdge, boss].filter(Boolean).length;
+    const selectedFilters = [playerXp, mainDeadlands, mainEdge, boss].filter(Boolean).length;
     const xpFactors = { new: 0.42, beginner: 0.56, intermediate: 0.72, expert: 0.88 };
+    const deadlandsFactors = { ooze: 0.84, skelechonk: 0.68, banshee: 0.56, ghost: 0.46 };
     const edgeFactors = { rats: 0.74, spiders: 0.62, necros: 0.5, armored: 0.44 };
     const bossFactors = { vampire: 0.78, lich: 0.64, gargoyle: 0.52, shadow: 0.4 };
     const baseOutcomes = [
@@ -217,10 +227,14 @@ async function mockApiFetch(path, init = {}) {
     ];
     const allOutcomes = baseOutcomes.map((row, index) => {
       const xpFactor = xpFactors[playerXp] ?? 1;
+      const deadlandsFactor = deadlandsFactors[mainDeadlands] ?? 1;
       const edgeFactor = edgeFactors[mainEdge] ?? 1;
       const bossFactor = bossFactors[boss] ?? 1;
       const rowVariance = selectedFilters ? 1 + index * 0.08 : 1;
-      const count = Math.max(selectedFilters ? 1 : 0, Math.round(row.count * xpFactor * edgeFactor * bossFactor * rowVariance));
+      const count = Math.max(
+        selectedFilters ? 1 : 0,
+        Math.round(row.count * xpFactor * deadlandsFactor * edgeFactor * bossFactor * rowVariance)
+      );
       return { ...row, count };
     });
     const outcomes = deathAct === null
@@ -433,26 +447,39 @@ function renderAnalyticsPanel() {
             `).join("")}
           </select>
         </label>
-        <label class="field">
-          <span>Main Edge</span>
-          <select class="select" data-field="analytics-main-edge">
-            ${ANALYTICS_MAIN_EDGE_OPTIONS.map((option) => `
-              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsMainEdge ? "selected" : ""}>
-                ${escapeHtml(option.label)}
-              </option>
-            `).join("")}
-          </select>
-        </label>
-        <label class="field">
-          <span>Boss</span>
-          <select class="select" data-field="analytics-boss">
-            ${ANALYTICS_BOSS_OPTIONS.map((option) => `
-              <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsBoss ? "selected" : ""}>
-                ${escapeHtml(option.label)}
-              </option>
-            `).join("")}
-          </select>
-        </label>
+        <fieldset class="filter-group">
+          <legend>Main enemies</legend>
+          <label class="field">
+            <span>Main Deadlands</span>
+            <select class="select" data-field="analytics-main-deadlands">
+              ${ANALYTICS_MAIN_DEADLANDS_OPTIONS.map((option) => `
+                <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsMainDeadlands ? "selected" : ""}>
+                  ${escapeHtml(option.label)}
+                </option>
+              `).join("")}
+            </select>
+          </label>
+          <label class="field">
+            <span>Main Edge</span>
+            <select class="select" data-field="analytics-main-edge">
+              ${ANALYTICS_MAIN_EDGE_OPTIONS.map((option) => `
+                <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsMainEdge ? "selected" : ""}>
+                  ${escapeHtml(option.label)}
+                </option>
+              `).join("")}
+            </select>
+          </label>
+          <label class="field">
+            <span>Boss</span>
+            <select class="select" data-field="analytics-boss">
+              ${ANALYTICS_BOSS_OPTIONS.map((option) => `
+                <option value="${escapeHtml(option.value)}" ${option.value === state.analyticsBoss ? "selected" : ""}>
+                  ${escapeHtml(option.label)}
+                </option>
+              `).join("")}
+            </select>
+          </label>
+        </fieldset>
       </div>
     </div>
     <div class="stat-grid">
@@ -583,6 +610,9 @@ async function loadAnalytics() {
     if (state.analyticsPlayerXp) {
       baseParams.set("player_xp", state.analyticsPlayerXp);
     }
+    if (state.analyticsMainDeadlands) {
+      baseParams.set("main_deadlands", state.analyticsMainDeadlands);
+    }
     if (state.analyticsMainEdge) {
       baseParams.set("main_edge", state.analyticsMainEdge);
     }
@@ -699,6 +729,10 @@ app.addEventListener("change", (event) => {
   }
   if (target?.dataset?.field === "analytics-player-xp") {
     state.analyticsPlayerXp = target.value;
+    void loadAnalytics();
+  }
+  if (target?.dataset?.field === "analytics-main-deadlands") {
+    state.analyticsMainDeadlands = target.value;
     void loadAnalytics();
   }
   if (target?.dataset?.field === "analytics-main-edge") {
